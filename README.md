@@ -100,8 +100,6 @@ python tests/test_booking_flow.py
 **Интерактивное тестирование:**
 Откройте frontend в браузере (если запущен) или используйте API напрямую.
 
-📖 **Подробная инструкция:** [QUICKSTART.md](QUICKSTART.md)
-
 ## API Endpoints
 
 Все запросы проходят через **API Gateway** (порт 5000).
@@ -183,8 +181,6 @@ Notification Service поддерживает отправку уведомле�
 
 ## Документация
 
-- [QUICKSTART.md](QUICKSTART.md) - быстрый старт
-- [INTEGRATION.md](INTEGRATION.md) - описание интеграций
 - [backend/docs/API.md](backend/docs/API.md) - подробная документация API
 - [backend/docs/ARCHITECTURE.md](backend/docs/ARCHITECTURE.md) - архитектура системы
 - [backend/docs/PAYMENT_TESTING.md](backend/docs/PAYMENT_TESTING.md) - тестирование платежей
