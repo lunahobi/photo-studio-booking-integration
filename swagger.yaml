@@ -1,0 +1,546 @@
+openapi: 3.0.3
+info:
+  title: Photo Studio Booking - API
+  version: 1.1.0
+  description: >
+    API Gateway (5000) for booking & payments + integration endpoints.
+    Payment webhook is served by Payment Service (5002).
+    Message Broker (5050) и Notification Service (5004) описаны как отдельные servers.
+
+servers:
+  - url: http://localhost:5000
+    description: API Gateway
+  - url: http://localhost:5002
+    description: Payment Service (webhooks)
+  - url: http://localhost:5050
+    description: Message Broker
+  - url: http://localhost:5004
+    description: Notification Service
+
+paths:
+  /health:
+    get:
+      summary: Health check (gateway + downstream services)
+      tags: [Gateway]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: healthy }
+                  service: { type: string, example: apigateway }
+                  services:
+                    type: object
+                    additionalProperties: { type: string, example: healthy }
+
+  /api/bookings/availability:
+    get:
+      summary: Check availability slots
+      tags: [Bookings]
+      parameters:
+        - in: query
+          name: hall_id
+          required: false
+          schema: { type: string, example: hall-001 }
+        - in: query
+          name: start_date
+          required: true
+          schema: { type: string, format: date-time, example: "2025-12-17T00:00:00Z" }
+        - in: query
+          name: end_date
+          required: true
+          schema: { type: string, format: date-time, example: "2025-12-18T00:00:00Z" }
+      responses:
+        "200":
+          description: Slots list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items: { $ref: "#/components/schemas/Slot" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/bookings:
+    post:
+      summary: Create booking
+      tags: [Bookings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingCreateRequest" }
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "400":
+          description: Selected time not available
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/bookings/{booking_id}:
+    get:
+      summary: Get booking by id
+      tags: [Bookings]
+      parameters:
+        - in: path
+          name: booking_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Booking
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Cancel booking
+      tags: [Bookings]
+      parameters:
+        - in: path
+          name: booking_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Booking cancelled
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "400":
+          description: Already cancelled / invalid state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/payments:
+    post:
+      summary: Create payment
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PaymentCreateRequest" }
+      responses:
+        "201":
+          description: Payment created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/payments/{payment_id}:
+    get:
+      summary: Get payment by id
+      tags: [Payments]
+      parameters:
+        - in: path
+          name: payment_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Payment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Payment" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/payments/webhook/{gateway}:
+    post:
+      summary: Payment webhook (Payment Service 5002)
+      description: >
+        This endpoint is hosted on http://localhost:5002 (Payment Service),
+        not via API Gateway. For YooKassa payload uses event/object structure.
+      tags: [Payments]
+      servers:
+        - url: http://localhost:5002
+      parameters:
+        - in: path
+          name: gateway
+          required: true
+          schema:
+            type: string
+            enum: [yookassa, sberpay, tinkoff]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/YooKassaWebhook" }
+      responses:
+        "200":
+          description: Processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+        "400":
+          description: Invalid gateway/payload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Payment not found by external id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/payments/{payment_id}/refund:
+    post:
+      summary: Refund payment (only succeeded)
+      description: >
+        Before calling this endpoint, you must create a payment and process
+        successful webhook so that payment status becomes `succeeded`.
+      tags: [Payments]
+      parameters:
+        - in: path
+          name: payment_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
+      responses:
+        "200":
+          description: Refund result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Refund" }
+        "400":
+          description: Invalid state or validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/integrations/events:
+    get:
+      summary: Get integration events log
+      tags: [Integrations]
+      parameters:
+        - in: query
+          name: event_type
+          required: false
+          schema: { type: string, example: payment.succeeded }
+        - in: query
+          name: source_service
+          required: false
+          schema: { type: string, example: payment }
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, default: 100, example: 10 }
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/IntegrationEvent" }
+                  total:
+                    type: integer
+                    example: 3
+
+  /broker/queues:
+    get:
+      summary: Get broker queues info
+      tags: [Broker]
+      servers:
+        - url: http://localhost:5050
+      responses:
+        "200":
+          description: Queues info
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    event_type: { type: string, example: booking.created }
+                    size: { type: integer, example: 0 }
+                    messages:
+                      type: array
+                      items:
+                        type: object
+                        additionalProperties: true
+
+  /api/notifications:
+    get:
+      summary: Get sent notifications
+      tags: [Notifications]
+      servers:
+        - url: http://localhost:5004
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, default: 100, example: 20 }
+      responses:
+        "200":
+          description: Notifications list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items: { $ref: "#/components/schemas/Notification" }
+                  total:
+                    type: integer
+                    example: 5
+
+  /api/notifications/send:
+    post:
+      summary: Send notification manually
+      tags: [Notifications]
+      servers:
+        - url: http://localhost:5004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendNotificationRequest" }
+      responses:
+        "200":
+          description: Notification sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: sent }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Выбранное время недоступно"
+
+    Slot:
+      type: object
+      properties:
+        hall_id: { type: string, example: hall-001 }
+        start_time: { type: string, example: "Wed, 17 Dec 2025 23:00:00 GMT" }
+        end_time: { type: string, example: "Wed, 17 Dec 2025 23:15:00 GMT" }
+        available: { type: boolean, example: true }
+
+    BookingCreateRequest:
+      type: object
+      required: [hall_id, user_id, start_time, end_time, customer_name, customer_email, customer_phone]
+      properties:
+        hall_id: { type: string, example: hall-001 }
+        user_id: { type: string, example: user-123 }
+        start_time: { type: string, format: date-time, example: "2025-12-17T14:00:00" }
+        end_time: { type: string, format: date-time, example: "2025-12-17T16:00:00" }
+        customer_name: { type: string, example: "Иван Иванов" }
+        customer_email: { type: string, example: "ivan@example.com" }
+        customer_phone: { type: string, example: "+79161234567" }
+
+    Booking:
+      type: object
+      properties:
+        booking_id: { type: string, format: uuid }
+        hall_id: { type: string, example: hall-001 }
+        user_id: { type: string, example: user-123 }
+        start_time: { type: string, example: "Wed, 17 Dec 2025 14:00:00 GMT" }
+        end_time: { type: string, example: "Wed, 17 Dec 2025 16:00:00 GMT" }
+        status:
+          type: string
+          enum: [pending_payment, confirmed, cancelled, completed]
+          example: pending_payment
+        total_amount: { type: string, example: "3000.0" }
+        customer_name: { type: string, example: "Иван Иванов" }
+        customer_email: { type: string, example: "ivan@example.com" }
+        customer_phone: { type: string, example: "+79161234567" }
+        created_at: { type: string, example: "Tue, 16 Dec 2025 23:37:11 GMT" }
+        updated_at: { type: string, nullable: true, example: null }
+
+    PaymentCreateRequest:
+      type: object
+      required: [booking_id, amount, payment_type, payment_method]
+      properties:
+        booking_id: { type: string, format: uuid }
+        amount: { type: number, example: 3000.0 }
+        payment_type:
+          type: string
+          enum: [prepayment, full_payment]
+          example: full_payment
+        payment_method:
+          type: string
+          enum: [yookassa, sberpay, tinkoff]
+          example: yookassa
+        return_url:
+          type: string
+          nullable: true
+          example: "https://example.com/return"
+
+    Payment:
+      type: object
+      properties:
+        payment_id: { type: string, format: uuid }
+        booking_id: { type: string, format: uuid }
+        amount: { type: string, example: "3000.0" }
+        status:
+          type: string
+          enum: [pending, succeeded, failed, refunded]
+          example: pending
+        payment_method:
+          type: string
+          enum: [yookassa, sberpay, tinkoff]
+        payment_url: { type: string, example: "https://yoomoney.ru/checkout/payments/v2/contract?orderId=..." }
+        external_payment_id: { type: string, example: "yookassa-0294d913-3de5-4ad0-8616-4eb6b7b233a1" }
+        created_at: { type: string, example: "Tue, 16 Dec 2025 23:39:28 GMT" }
+        updated_at: { type: string, nullable: true, example: null }
+
+    RefundRequest:
+      type: object
+      required: [payment_id]
+      properties:
+        payment_id:
+          type: string
+          format: uuid
+          example: "af50a1ae-494a-465c-80af-446406a935ba"
+        amount:
+          type: number
+          nullable: true
+          example: 1500.0
+        reason:
+          type: string
+          nullable: true
+          example: "Partial refund"
+
+    Refund:
+      type: object
+      properties:
+        refund_id: { type: string, format: uuid }
+        payment_id: { type: string, format: uuid }
+        amount: { type: string, example: "1500.0" }
+        status: { type: string, example: succeeded }
+        timestamp: { type: string, format: date-time }
+
+    IntegrationEvent:
+      type: object
+      properties:
+        event_id: { type: string, format: uuid }
+        event_type: { type: string, example: payment.succeeded }
+        source_service: { type: string, example: payment }
+        payload: { type: object, additionalProperties: true }
+        status: { type: string, example: processed }
+        timestamp: { type: string, format: date-time }
+        processed_at: { type: string, nullable: true, format: date-time }
+
+    Notification:
+      type: object
+      properties:
+        notification_id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [email, sms]
+          example: email
+        to: { type: string, example: "ivan@example.com" }
+        subject: { type: string, nullable: true, example: "Подтверждение бронирования" }
+        body: { type: string, nullable: true, example: "Иван, ваше бронирование подтверждено." }
+        message: { type: string, nullable: true, example: "Ваше бронирование подтверждено." }
+        status: { type: string, example: sent }
+        sent_at: { type: string, format: date-time }
+
+    SendNotificationRequest:
+      type: object
+      required: [type, to]
+      properties:
+        type:
+          type: string
+          enum: [email, sms]
+          example: email
+        to:
+          type: string
+          example: "ivan@example.com"
+        subject:
+          type: string
+          nullable: true
+          example: "Тема письма"
+        body:
+          type: string
+          nullable: true
+          example: "Текст письма"
+        message:
+          type: string
+          nullable: true
+          example: "Текст SMS"
+
+    YooKassaWebhook:
+      type: object
+      required: [event, object]
+      properties:
+        type: { type: string, example: notification }
+        event: { type: string, example: payment.succeeded }
+        object:
+          type: object
+          required: [id, status, amount]
+          properties:
+            id: { type: string, example: "yookassa-0294d913-3de5-4ad0-8616-4eb6b7b233a1" }
+            status: { type: string, example: succeeded }
+            amount:
+              type: object
+              properties:
+                value: { type: string, example: "3000.0" }
+                currency: { type: string, example: RUB }
+            metadata:
+              type: object
+              additionalProperties: true
+        created_at: { type: string, nullable: true, format: date-time }

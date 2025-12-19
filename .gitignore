@@ -1,0 +1,42 @@
+# Python bytecode / кэш
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Расширения C
+*.so
+
+# Виртуальные окружения
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Базы, логи, временные файлы
+*.db
+*.sqlite
+*.log
+
+# IDE и системный мусор
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+pnpm-lock.yaml
+
+# Сборки фронтенда (если появятся)
+dist/
+build/
+# Env-файлы и секреты
+.env
+.env.*
+*.env
